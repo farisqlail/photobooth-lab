@@ -10,5 +10,13 @@ export const createSupabaseBrowserClient = () => {
     );
   }
 
+  try {
+    new URL(url);
+  } catch {
+    throw new Error(
+      `Invalid NEXT_PUBLIC_SUPABASE_URL: ${url}. Must be a valid HTTP/HTTPS URL.`
+    );
+  }
+
   return createBrowserClient(url, anonKey);
 };

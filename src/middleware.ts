@@ -11,6 +11,13 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  try {
+    new URL(url);
+  } catch {
+    console.error(`Invalid NEXT_PUBLIC_SUPABASE_URL: ${url}`);
+    return response;
+  }
+
   const supabase = createServerClient(url, anonKey, {
     cookies: {
       getAll() {

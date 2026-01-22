@@ -26,7 +26,7 @@ const getAuthClient = async () => {
       getAll() {
         return cookieStore.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
         cookiesToSet.forEach(({ name, value, options }) => {
           cookieStore.set(name, value, options);
         });
@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: upload.error.message }, { status: 400 });
   }
   const insert = await auth.adminClient.from("templates").insert({
-    name: fileName.replace(/\.[^.]+$/, ""),
+    name: String(fileName || file.name).replace(/\.[^.]+$/, ""),
     file_path: filePath,
   });
   if (insert.error) {
