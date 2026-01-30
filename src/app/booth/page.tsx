@@ -17,6 +17,17 @@ import {
 } from "../../components/features/booth/types";
 import { filters } from "../../components/features/booth/constants";
 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+
 import { IdleStep } from "../../components/features/booth/idle-step";
 import { PaymentStep } from "../../components/features/booth/payment-step";
 import { NonCashStep } from "../../components/features/booth/non-cash-step";
@@ -73,9 +84,44 @@ export default function BoothPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<TemplateOption | null>(null);
   const [templateImage, setTemplateImage] = useState<HTMLImageElement | null>(null);
   const [selectedFilter, setSelectedFilter] = useState(filters[0].value);
+  const [sessionTimeLeft, setSessionTimeLeft] = useState<number | null>(null);
+  const [isVoucherDialogOpen, setIsVoucherDialogOpen] = useState(false);
+  const [voucherCode, setVoucherCode] = useState("");
+  const [verifyingVoucher, setVerifyingVoucher] = useState(false);
 
   // --- Refs ---
   const finishTimerRef = useRef<number | null>(null);
+
+  // --- Effects ---
+
+  // --- Helpers ---
+
+  const clearFinishTimer = useCallback(() => {
+    if (finishTimerRef.current) {
+      window.clearTimeout(finishTimerRef.current);
+      finishTimerRef.current = null;
+    }
+  }, []);
+
+  const resetFlow = useCallback(() => {
+    clearFinishTimer();
+    dispatch({ type: "RESET" });
+    setSelectedTemplate(null);
+    setTemplateImage(null);
+    setSelectedFilter(filters[0].value);
+    setSessionTimeLeft(null);
+    resetSession();
+    resetImages();
+    // Note: We don't clear templates/payment methods data as they are global/cached
+  }, [dispatch, resetSession, resetImages, clearFinishTimer]);
+
+  const goToStep = async (step: Step) => {
+    clearFinishTimer();
+    if (step !== "session") {
+      stopCamera();
+    }
+    dispatch({ type: "SET_STEP", step });
+  };
 
   // --- Effects ---
 
@@ -92,7 +138,29 @@ export default function BoothPage() {
         finishTimerRef.current = null;
       }
     };
-  }, [state.step]);
+  }, [state.step, resetFlow]);
+
+  // Handle session countdown
+  useEffect(() => {
+    if (state.transaction?.payment_status === "paid" && sessionTimeLeft === null) {
+      setSessionTimeLeft(pricing.sessionCountdown);
+    }
+  }, [state.transaction?.payment_status, pricing.sessionCountdown, sessionTimeLeft]);
+
+  useEffect(() => {
+    if (sessionTimeLeft === null) return;
+
+    if (sessionTimeLeft <= 0) {
+      resetFlow();
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setSessionTimeLeft((prev) => (prev !== null ? prev - 1 : null));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [sessionTimeLeft, resetFlow]);
 
   // Load template image when selected template changes
   useEffect(() => {
@@ -106,34 +174,6 @@ export default function BoothPage() {
         .catch((e) => console.error("Failed to reload template image", e));
     }
   }, [state.step, selectedTemplate, templateImage]);
-
-  // --- Helpers ---
-
-  const clearFinishTimer = () => {
-    if (finishTimerRef.current) {
-      window.clearTimeout(finishTimerRef.current);
-      finishTimerRef.current = null;
-    }
-  };
-
-  const resetFlow = () => {
-    clearFinishTimer();
-    dispatch({ type: "RESET" });
-    setSelectedTemplate(null);
-    setTemplateImage(null);
-    setSelectedFilter(filters[0].value);
-    resetSession();
-    resetImages();
-    // Note: We don't clear templates/payment methods data as they are global/cached
-  };
-
-  const goToStep = async (step: Step) => {
-    clearFinishTimer();
-    if (step !== "session") {
-      stopCamera();
-    }
-    dispatch({ type: "SET_STEP", step });
-  };
 
   const stepLabel = useMemo(() => {
     switch (state.step) {
@@ -164,13 +204,13 @@ export default function BoothPage() {
 
   const handleStart = async () => {
     await loadPricing();
-    await loadPaymentMethods();
-    await goToStep("payment");
-  };
-
-  const handleSelectPayment = async (method: PaymentMethod) => {
-    dispatch({ type: "SET_PAYMENT_METHOD", method: method.name });
-    if (method.type === "cash") {
+    const methods = await loadPaymentMethods();
+    
+    // Check if "Event" is the ONLY active payment method
+    // Note: methods can be undefined if something fails, so we check for array existence
+    if (methods && methods.length === 1 && methods[0].name === "Event") {
+      dispatch({ type: "SET_PAYMENT_METHOD", method: methods[0].name });
+      
       const templates = await loadTemplates();
       if (templates.length > 0) {
         const first = templates[0];
@@ -182,20 +222,68 @@ export default function BoothPage() {
       await goToStep("template");
       return;
     }
-    await goToStep("noncash");
+
+    await goToStep("payment");
+  };
+
+  const proceedToTemplate = async () => {
+    const templates = await loadTemplates();
+    if (templates.length > 0) {
+      const first = templates[0];
+      setSelectedTemplate(first);
+      dispatch({ type: "SET_TEMPLATE", templateId: first.id });
+      const image = await loadImage(first.url);
+      setTemplateImage(image);
+    }
+    await goToStep("template");
+  };
+
+  const handleSelectPayment = async (method: PaymentMethod) => {
+    if (method.type === 'cash') {
+       setIsVoucherDialogOpen(true);
+       return;
+    }
+
+    dispatch({ type: "SET_PAYMENT_METHOD", method: method.name });
+    await proceedToTemplate();
+  };
+
+  const handleVoucherSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!voucherCode.trim()) return;
+
+    setVerifyingVoucher(true);
+    try {
+      const res = await fetch("/api/booth/redeem-voucher", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ code: voucherCode }),
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+         setIsVoucherDialogOpen(false);
+         setVoucherCode(""); 
+         
+         const cashMethod = paymentMethods.find(m => m.type === 'cash');
+         dispatch({ type: "SET_PAYMENT_METHOD", method: cashMethod?.name || "Cash" });
+         
+         await proceedToTemplate();
+      } else {
+         // Use native alert or toast if available. Since we don't have toast imported here yet (or context), alert is fine.
+         alert(data.error || "Invalid voucher");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error verifying voucher");
+    } finally {
+      setVerifyingVoucher(false);
+    }
   };
 
   const handleSelectNonCash = async (method: PaymentMethod) => {
     dispatch({ type: "SET_PAYMENT_METHOD", method: method.name });
-    const templates = await loadTemplates();
-    if (templates.length > 0) {
-        const first = templates[0];
-        setSelectedTemplate(first);
-        dispatch({ type: "SET_TEMPLATE", templateId: first.id });
-        const image = await loadImage(first.url);
-        setTemplateImage(image);
-    }
-    await goToStep("template");
+    await proceedToTemplate();
   };
 
   const handleTemplateSelect = async (template: TemplateOption) => {
@@ -209,6 +297,30 @@ export default function BoothPage() {
     if (!selectedTemplate) {
       return;
     }
+
+    // Check if payment method is "Event"
+    if (state.transaction.payment_method?.toLowerCase() === "event") {
+        // Auto-select quantity 1 and skip quantity step
+        dispatch({ type: "SET_QUANTITY", quantity: 1 });
+        const total = 0; // Free for event
+        dispatch({ type: "SET_TOTAL_PRICE", total });
+        
+        const transactionId = await createTransaction(
+          total, 
+          state.transaction.payment_method, 
+          selectedTemplate?.id
+        );
+        
+        if (transactionId) {
+          dispatch({ type: "SET_TRANSACTION_ID", id: transactionId });
+          await updateTransactionStatus(transactionId, "paid");
+        }
+
+        dispatch({ type: "SET_PAYMENT_STATUS", status: "paid" });
+        await goToStep("session");
+        return;
+    }
+
     await goToStep("quantity");
   };
 
@@ -227,7 +339,8 @@ export default function BoothPage() {
       dispatch({ type: "SET_TRANSACTION_ID", id: transactionId });
     }
 
-    if (state.transaction.payment_method?.toLowerCase() === "tunai") {
+    const method = state.transaction.payment_method?.toLowerCase();
+    if (method === "tunai" || method === "cash" || method === "event") {
       dispatch({ type: "SET_PAYMENT_STATUS", status: "paid" });
       if (transactionId) {
         await updateTransactionStatus(transactionId, "paid");
@@ -293,6 +406,15 @@ export default function BoothPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {sessionTimeLeft !== null && (
+            <div className={`rounded-full px-4 py-1.5 text-sm font-bold backdrop-blur-sm transition-colors ${
+              sessionTimeLeft <= 60 
+                ? "bg-red-500/80 text-white animate-pulse" 
+                : "bg-primary/80 text-primary-foreground"
+            }`}>
+              {Math.floor(sessionTimeLeft / 60)}:{(sessionTimeLeft % 60).toString().padStart(2, '0')}
+            </div>
+          )}
           <div className="rounded-full bg-secondary/50 px-4 py-1.5 text-sm font-medium text-secondary-foreground backdrop-blur-sm">
             {stepLabel}
           </div>
@@ -393,6 +515,7 @@ export default function BoothPage() {
               onGoToStep={goToStep}
               capturedPhotos={capturedPhotos}
               capturedVideos={capturedVideos}
+              supabase={supabase}
             />
           )}
 
@@ -400,6 +523,33 @@ export default function BoothPage() {
             <FinishStep key="finish" onReset={resetFlow} />
           )}
         </AnimatePresence>
+
+        <Dialog open={isVoucherDialogOpen} onOpenChange={setIsVoucherDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Enter Voucher Code</DialogTitle>
+              <DialogDescription>
+                Please enter the voucher code provided by the operator.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleVoucherSubmit} className="space-y-4">
+              <Input
+                placeholder="PH-XXXX"
+                value={voucherCode}
+                onChange={(e) => setVoucherCode(e.target.value.toUpperCase())}
+                autoFocus
+              />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setIsVoucherDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={verifyingVoucher || !voucherCode}>
+                  {verifyingVoucher ? "Verifying..." : "Validate"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );

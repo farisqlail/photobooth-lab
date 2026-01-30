@@ -10,31 +10,10 @@ export function useImageProcessing(supabase: SupabaseClient | null) {
 
   const uploadFinalImage = async (dataUrl: string, transactionId?: string) => {
     if (!supabase) {
-       // Direct fallback to local storage if supabase is not configured
-       try {
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-        const file = new File([blob], "final.png", { type: "image/png" });
-        
-        const formData = new FormData();
-        formData.append("file", file);
-        
-        const uploadRes = await fetch("/api/local-storage", {
-          method: "POST",
-          body: formData,
-        });
-        
-        if (uploadRes.ok) {
-          const result = await uploadRes.json();
-          const absoluteUrl = `${window.location.origin}${result.url}`;
-          setStorageUrl(absoluteUrl);
-          return absoluteUrl;
-        }
-      } catch (localError) {
-        console.error("Local upload failed:", localError);
-      }
-      setStorageUrl(dataUrl);
-      return dataUrl;
+       // Supabase not configured, strictly use dataUrl as fallback (no local storage)
+       console.warn("Supabase not configured, skipping upload.");
+       setStorageUrl(dataUrl);
+       return dataUrl;
     }
     setIsUploading(true);
     try {
@@ -45,11 +24,7 @@ export function useImageProcessing(supabase: SupabaseClient | null) {
         : `temp/${Date.now()}.png`;
 
       const { error: uploadError } = await supabase.storage
-        .from("transactions") // Assuming bucket is 'transactions' based on original code? 
-        // Wait, original code: .from("transactions") ? 
-        // Let's check original code. It says `transactions/${state.transaction.id}/final.png`
-        // But the bucket name is usually the first arg to .from(). 
-        // I need to check the original code's uploadFinalImage more carefully.
+        .from("captures") 
         .upload(filePath, blob, {
           contentType: "image/png",
           upsert: true,
@@ -58,39 +33,15 @@ export function useImageProcessing(supabase: SupabaseClient | null) {
       if (uploadError) throw uploadError;
 
       const { data } = await supabase.storage
-        .from("transactions")
+        .from("captures")
         .createSignedUrl(filePath, 3600 * 24 * 7); // 1 week
 
       setStorageUrl(data?.signedUrl ?? null);
       return data?.signedUrl ?? null;
     } catch (error) {
-      console.error("Supabase Upload failed, falling back to local storage:", error);
+      console.error("Supabase Upload failed:", error);
       
-      // Fallback: Upload to local API
-      try {
-        const response = await fetch(dataUrl);
-        const blob = await response.blob();
-        const file = new File([blob], "final.png", { type: "image/png" });
-        
-        const formData = new FormData();
-        formData.append("file", file);
-        
-        const uploadRes = await fetch("/api/local-storage", {
-          method: "POST",
-          body: formData,
-        });
-        
-        if (uploadRes.ok) {
-          const result = await uploadRes.json();
-          // Construct absolute URL using window.location.origin
-          const absoluteUrl = `${window.location.origin}${result.url}`;
-          setStorageUrl(absoluteUrl);
-          return absoluteUrl;
-        }
-      } catch (localError) {
-        console.error("Local upload failed:", localError);
-      }
-
+      // Removed local storage fallback to prevent storage usage
       // Final fallback to data URL (offline mode)
       setStorageUrl(dataUrl);
       return null;

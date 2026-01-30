@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { Step, TransactionData } from "./types";
 import { mergeVideos } from "@/lib/video-utils";
 import { createGif } from "@/lib/gif-utils";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 interface DeliveryStepProps {
   finalPreviewUrl: string | null;
@@ -19,6 +20,7 @@ interface DeliveryStepProps {
   isUploading: boolean;
   capturedPhotos?: string[];
   capturedVideos?: string[];
+  supabase: SupabaseClient | null;
 }
 
 export function DeliveryStep({
@@ -30,11 +32,19 @@ export function DeliveryStep({
   isUploading,
   capturedPhotos = [],
   capturedVideos = [],
+  supabase,
 }: DeliveryStepProps) {
   const [isMerging, setIsMerging] = useState(false);
   const [localQrUrl, setLocalQrUrl] = useState<string | null>(null);
   const [gifUrl, setGifUrl] = useState<string | null>(null);
   const [isGeneratingGif, setIsGeneratingGif] = useState(false);
+  
+  // State for email assets
+  const [videoDownloadUrl, setVideoDownloadUrl] = useState<string | null>(null);
+  const [gifDownloadUrl, setGifDownloadUrl] = useState<string | null>(null);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [emailErrorMessage, setEmailErrorMessage] = useState<string>("");
 
   // Helper to generate a landing page for both photo and video
   const generateLandingPage = async (photoUrl: string, videoUrl: string | null, gifDownloadUrl: string | null) => {
@@ -71,14 +81,21 @@ export function DeliveryStep({
        `;
        
        const blob = new Blob([html], { type: 'text/html' });
-       const file = new File([blob], "index.html", { type: "text/html" });
-       const formData = new FormData();
-       formData.append("file", file);
        
-       const res = await fetch("/api/local-storage", { method: "POST", body: formData });
-       if (res.ok) {
-         const data = await res.json();
-         return `${window.location.origin}${data.url}`;
+       if (supabase && transaction.id) {
+          const filePath = `transactions/${transaction.id}/index.html`;
+          const { error } = await supabase.storage
+              .from("captures")
+              .upload(filePath, blob, { contentType: "text/html", upsert: true });
+
+          if (!error) {
+             const { data } = await supabase.storage
+                .from("captures")
+                .createSignedUrl(filePath, 3600 * 24 * 7); // 1 week
+             return data?.signedUrl ?? null;
+          } else {
+             console.error("Failed to upload landing page to Supabase", error);
+          }
        }
     } catch (e) {
       console.error("Failed to generate landing page", e);
@@ -99,14 +116,10 @@ export function DeliveryStep({
     }
   }, [capturedPhotos, gifUrl, isGeneratingGif]);
 
-  // Effect to handle upload of merged video and generation of QR code
+  // Handle auto-upload for QR code generation
   useEffect(() => {
     const prepareDownload = async () => {
         // If no storageUrl or it is a data url (meaning no upload happened yet or failed)
-        // BUT wait, my previous fix makes storageUrl a LOCAL URL if upload failed.
-        // So storageUrl might be http://localhost...
-        // If it starts with data:, it's strictly offline.
-        
         if (!storageUrl || storageUrl.startsWith("data:")) return;
         if (localQrUrl) return; // Already generated
 
@@ -117,17 +130,15 @@ export function DeliveryStep({
             try {
                 // Check if we need to merge locally
                 const mergedUrl = await mergeVideos(capturedVideos); // This returns blob url
-                // Upload blob url to local storage
                 const response = await fetch(mergedUrl);
                 const blob = await response.blob();
-                const file = new File([blob], "video.webm", { type: "video/webm" });
-                const formData = new FormData();
-                formData.append("file", file);
                 
-                const uploadRes = await fetch("/api/local-storage", { method: "POST", body: formData });
-                if (uploadRes.ok) {
-                    const data = await uploadRes.json();
-                    videoDownloadUrl = `${window.location.origin}${data.url}`;
+                if (supabase && transaction.id) {
+                    const filePath = `transactions/${transaction.id}/video.webm`;
+                    await supabase.storage.from("captures").upload(filePath, blob, { contentType: "video/webm", upsert: true });
+                    const { data } = await supabase.storage.from("captures").createSignedUrl(filePath, 3600 * 24 * 7); // 1 week
+                    videoDownloadUrl = data?.signedUrl ?? null;
+                    setVideoDownloadUrl(videoDownloadUrl);
                 }
             } catch (e) {
                 console.error("Background video merge failed", e);
@@ -140,14 +151,13 @@ export function DeliveryStep({
              try {
                 const response = await fetch(gifUrl);
                 const blob = await response.blob();
-                const file = new File([blob], "animation.gif", { type: "image/gif" });
-                const formData = new FormData();
-                formData.append("file", file);
                 
-                const uploadRes = await fetch("/api/local-storage", { method: "POST", body: formData });
-                if (uploadRes.ok) {
-                    const data = await uploadRes.json();
-                    gifDownloadUrl = `${window.location.origin}${data.url}`;
+                if (supabase && transaction.id) {
+                    const filePath = `transactions/${transaction.id}/animation.gif`;
+                    await supabase.storage.from("captures").upload(filePath, blob, { contentType: "image/gif", upsert: true });
+                    const { data } = await supabase.storage.from("captures").createSignedUrl(filePath, 3600 * 24 * 7); // 1 week
+                    gifDownloadUrl = data?.signedUrl ?? null;
+                    setGifDownloadUrl(gifDownloadUrl);
                 }
              } catch (e) {
                  console.error("GIF upload failed", e);
@@ -162,14 +172,13 @@ export function DeliveryStep({
                 setGifUrl(url); // Update state too
                 const response = await fetch(url);
                 const blob = await response.blob();
-                const file = new File([blob], "animation.gif", { type: "image/gif" });
-                const formData = new FormData();
-                formData.append("file", file);
                 
-                const uploadRes = await fetch("/api/local-storage", { method: "POST", body: formData });
-                if (uploadRes.ok) {
-                    const data = await uploadRes.json();
-                    gifDownloadUrl = `${window.location.origin}${data.url}`;
+                if (supabase && transaction.id) {
+                    const filePath = `transactions/${transaction.id}/animation.gif`;
+                    await supabase.storage.from("captures").upload(filePath, blob, { contentType: "image/gif", upsert: true });
+                    const { data } = await supabase.storage.from("captures").createSignedUrl(filePath, 3600 * 24 * 7); // 1 week
+                    gifDownloadUrl = data?.signedUrl ?? null;
+                    setGifDownloadUrl(gifDownloadUrl);
                 }
              } catch (e) {
                  console.error("Just-in-time GIF generation failed", e);
@@ -185,9 +194,59 @@ export function DeliveryStep({
             setLocalQrUrl(storageUrl);
         }
     };
+    
+    if (capturedVideos.length > 0 || capturedPhotos.length > 0) {
+        prepareDownload();
+    } else {
+        // No extra media, just generate landing page or use photo url
+        if (storageUrl && !storageUrl.startsWith("data:") && !localQrUrl) {
+            generateLandingPage(storageUrl, null, null).then(url => {
+                 setLocalQrUrl(url || storageUrl);
+            });
+        }
+    }
+  }, [storageUrl, capturedVideos, capturedPhotos, localQrUrl, gifUrl, supabase, transaction.id]);
 
-    prepareDownload();
-  });
+  const handleSendEmail = async () => {
+    if (!transaction.email || !storageUrl) return;
+
+    setIsSendingEmail(true);
+    setEmailStatus('idle');
+    setEmailErrorMessage("");
+
+    try {
+        const response = await fetch('/api/send-email', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                email: transaction.email,
+                photoUrl: storageUrl,
+                videoUrl: videoDownloadUrl,
+                gifUrl: gifDownloadUrl,
+            }),
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to send email');
+        }
+
+        setEmailStatus('success');
+    } catch (error) {
+        console.error("Failed to send email", error);
+        setEmailStatus('error');
+        if (error instanceof Error) {
+           setEmailErrorMessage(error.message);
+        } else {
+           setEmailErrorMessage("Gagal mengirim email.");
+        }
+    } finally {
+        setIsSendingEmail(false);
+    }
+  };
 
   const downloadPhoto = (url: string, index: number) => {
     const link = document.createElement('a');
@@ -290,11 +349,33 @@ export function DeliveryStep({
               <Mail className="h-4 w-4" />
               Kirim lewat Email
             </div>
-            <Input
-              placeholder="Email pelanggan"
-              value={transaction.email ?? ""}
-              onChange={(event) => onSetEmail(event.target.value)}
-            />
+            <div className="flex w-full max-w-sm items-center space-x-2">
+                <Input
+                  placeholder="Email pelanggan"
+                  value={transaction.email ?? ""}
+                  onChange={(event) => onSetEmail(event.target.value)}
+                />
+                <Button 
+                    onClick={handleSendEmail} 
+                    disabled={isSendingEmail || !transaction.email}
+                    size="icon"
+                >
+                    {isSendingEmail ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <Mail className="h-4 w-4" />
+                    )}
+                </Button>
+            </div>
+            {emailStatus === 'success' && (
+                <p className="text-sm text-green-500">Email berhasil dikirim!</p>
+            )}
+            {emailStatus === 'error' && (
+                <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                   <p className="font-medium">Gagal mengirim email</p>
+                   <p className="mt-1 text-xs opacity-90">{emailErrorMessage}</p>
+                </div>
+            )}
             <Button onClick={() => window.print()}>
               <Printer className="h-4 w-4" />
               Cetak Foto

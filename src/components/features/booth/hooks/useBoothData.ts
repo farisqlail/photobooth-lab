@@ -20,7 +20,7 @@ export function useBoothData() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [nonCashMethods, setNonCashMethods] = useState<PaymentMethod[]>([]);
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
-  const [pricing, setPricing] = useState({ basePrice: 20000, perPrintPrice: 5000 });
+  const [pricing, setPricing] = useState({ basePrice: 20000, perPrintPrice: 5000, sessionCountdown: 300 });
 
   const loadPaymentMethods = async () => {
     if (!supabase) {
@@ -35,7 +35,12 @@ export function useBoothData() {
         { id: "gopay", name: "GoPay", type: "non_cash", is_active: true },
         { id: "ovo", name: "OVO", type: "non_cash", is_active: true },
       ]);
-      return;
+      return [
+        { id: "cash", name: "Tunai", type: "cash", is_active: true },
+        { id: "qris", name: "QRIS", type: "non_cash", is_active: true },
+        { id: "gopay", name: "GoPay", type: "non_cash", is_active: true },
+        { id: "ovo", name: "OVO", type: "non_cash", is_active: true },
+      ];
     }
     const { data } = await supabase
       .from("payment_methods")
@@ -46,22 +51,47 @@ export function useBoothData() {
     const nonCash = methods.filter((method) => method.type === "non_cash");
     setPaymentMethods(methods);
     setNonCashMethods(nonCash);
+    return methods;
   };
 
   const loadPricing = async () => {
     if (!supabase) {
       return;
     }
-    const { data } = await supabase
+    
+    // Try to select with session_countdown
+    const { data, error } = await supabase
       .from("pricing_settings")
-      .select("id,base_price,per_print_price,updated_at")
+      .select("id,base_price,per_print_price,session_countdown,updated_at")
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    if (error && error.code === "PGRST200") {
+        // Fallback if column doesn't exist
+        console.warn("session_countdown column missing, using default.");
+        const { data: fallbackData } = await supabase
+          .from("pricing_settings")
+          .select("id,base_price,per_print_price,updated_at")
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+          
+        if (fallbackData) {
+            setPricing({
+                basePrice: Number(fallbackData.base_price),
+                perPrintPrice: Number(fallbackData.per_print_price),
+                sessionCountdown: 300,
+            });
+        }
+        return;
+    }
+
     if (data) {
       setPricing({
         basePrice: Number(data.base_price),
         perPrintPrice: Number(data.per_print_price),
+        sessionCountdown: data.session_countdown ? Number(data.session_countdown) : 300,
       });
     }
   };

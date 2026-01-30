@@ -1,4 +1,9 @@
+'use client';
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter, usePathname } from "next/navigation";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   BarChart3,
   Camera,
@@ -6,20 +11,74 @@ import {
   Home,
   Settings,
   Users,
+  Image as ImageIcon,
+  LogOut,
+  Ticket,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 
 const navItems = [
-  { label: "Overview", icon: Gauge, href: "/admin" },
-  { label: "Sessions", icon: Camera, href: "/admin" },
-  { label: "Guests", icon: Users, href: "/admin" },
-  { label: "Analytics", icon: BarChart3, href: "/admin" },
-  { label: "Settings", icon: Settings, href: "/admin/settings" },
+  { label: "Overview", icon: Gauge, href: "/admin", roles: ['superadmin'] },
+  { label: "Templates", icon: ImageIcon, href: "/admin/templates", roles: ['superadmin'] },
+  { label: "Vouchers", icon: Ticket, href: "/admin/vouchers", roles: ['superadmin', 'operator'] },
+  { label: "Users", icon: Users, href: "/admin/users", roles: ['superadmin'] },
+  { label: "Settings", icon: Settings, href: "/admin/settings", roles: ['superadmin'] },
 ];
 
 export default function AdminLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const supabase = createSupabaseBrowserClient();
+  const [role, setRole] = useState<'superadmin' | 'operator' | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchRole = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+           router.replace('/admin/login');
+           return;
+        }
+
+        const { data: adminUser } = await supabase
+          .from('admin_users')
+          .select('role')
+          .eq('user_id', user.id)
+          .single();
+        
+        const userRole = adminUser?.role || 'operator';
+        setRole(userRole);
+
+        // Basic route protection
+        // If user is operator and tries to access non-operator pages, redirect to vouchers
+        if (userRole === 'operator' && !pathname.startsWith('/admin/vouchers')) {
+           router.replace('/admin/vouchers');
+        }
+
+      } catch (error) {
+        console.error("Error fetching role", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRole();
+  }, [supabase, router, pathname]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.replace('/admin/login');
+    router.refresh();
+  };
+
+  if (loading) {
+     return <div className="flex h-screen items-center justify-center">Loading...</div>;
+  }
+
+  const filteredNavItems = navItems.filter(item => role && item.roles.includes(role));
+
   return (
     <div className="min-h-screen bg-background">
       <div className="flex min-h-screen">
@@ -31,47 +90,34 @@ export default function AdminLayout({
             Booth Admin
           </div>
           <nav className="mt-8 flex flex-1 flex-col gap-2">
-            {navItems.map((item) => (
+            {filteredNavItems.map((item) => (
               <Link
                 key={item.label}
                 href={item.href}
-                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                   pathname === item.href 
+                    ? "bg-primary text-primary-foreground" 
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
               >
                 <item.icon className="h-4 w-4" />
                 {item.label}
               </Link>
             ))}
           </nav>
-          <Button asChild variant="secondary" size="sm">
-            <Link href="/admin/settings">
-              <Settings className="h-4 w-4" />
-              Settings
-            </Link>
+          <div className="mt-auto px-3 py-2">
+              <p className="text-xs text-muted-foreground mb-2">
+                Logged in as: <span className="font-semibold capitalize">{role}</span>
+              </p>
+          </div>
+          <Button variant="secondary" size="sm" onClick={handleLogout}>
+            <LogOut className="mr-2 h-4 w-4" />
+            Logout
           </Button>
         </aside>
-        <div className="flex flex-1 flex-col">
-          <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
-            <div>
-              <p className="text-sm text-muted-foreground">Dashboard</p>
-              <h1 className="text-xl font-semibold text-foreground">Admin Hub</h1>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/">
-                  <Home className="h-4 w-4" />
-                  Home
-                </Link>
-              </Button>
-              <Button asChild size="sm">
-                <Link href="/booth">
-                  <Camera className="h-4 w-4" />
-                  Booth
-                </Link>
-              </Button>
-            </div>
-          </header>
-          <main className="flex-1 px-6 py-8">{children}</main>
-        </div>
+        <main className="flex-1 overflow-y-auto bg-muted/10 p-8">
+          {children}
+        </main>
       </div>
     </div>
   );
