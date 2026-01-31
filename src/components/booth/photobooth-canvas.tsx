@@ -10,7 +10,7 @@ export default function PhotoboothCanvas() {
     let mounted = true;
 
     const setup = async () => {
-      const { fabric } = await import("fabric");
+      const fabric = await import("fabric");
       if (!canvasRef.current || !mounted) {
         return;
       }
