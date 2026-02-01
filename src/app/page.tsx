@@ -1,69 +1,83 @@
 import Link from "next/link";
-import { Camera, LayoutDashboard, Sparkles } from "lucide-react";
-import { Button } from "../components/ui/button";
-import { Card, CardContent } from "../components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Cloud, Mountain } from "lucide-react";
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-slate-950 to-slate-900">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-6 py-16">
-        <header className="flex flex-col gap-6">
-          <div className="flex items-center gap-3 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1">
-              <Sparkles className="h-4 w-4 text-primary" />
-              Booth Lab Platform
-            </span>
+    <div className="flex h-screen w-full flex-col bg-gradient-to-br from-orange-400 via-gray-200 to-blue-400 font-sans">
+      {/* Top Color Strip */}
+      <div className="flex h-4 w-full">
+        <div className="h-full w-1/4 bg-[#00AEEF]" />
+        <div className="h-full w-1/4 bg-[#FFF200]" />
+        <div className="h-full w-1/4 bg-[#F7941D]" />
+        <div className="h-full w-1/4 bg-[#EC008C]" />
+      </div>
+
+      {/* Main Content */}
+      <main className="flex flex-1 flex-col items-center justify-center p-4">
+        <div className="relative flex w-full max-w-2xl flex-col items-center overflow-hidden rounded-xl bg-white p-8 shadow-2xl">
+          
+          {/* Checkered Frame */}
+          <div className="relative mb-8 flex aspect-[4/3] w-full max-w-md items-center justify-center overflow-hidden border-[12px] border-[#333] bg-sky-200 p-1 shadow-inner">
+             {/* Decorative Dots Pattern on Border (Simulated with dashed border) */}
+             <div className="absolute inset-0 border-[4px] border-dashed border-white/30 pointer-events-none"></div>
+             
+             {/* Illustration */}
+             <div className="relative h-full w-full overflow-hidden bg-[#87CEEB]">
+               {/* Clouds */}
+               <Cloud className="absolute left-10 top-10 h-16 w-16 text-white opacity-90" fill="white" />
+               <Cloud className="absolute right-20 top-16 h-12 w-12 text-white opacity-80" fill="white" />
+               <Cloud className="absolute left-1/2 top-8 h-20 w-20 -translate-x-1/2 text-white" fill="white" />
+               
+               {/* Hills */}
+               <div className="absolute bottom-0 h-1/2 w-full">
+                 <div className="absolute bottom-0 left-0 h-full w-[120%] -translate-x-10 rounded-tr-[100%] bg-[#7CB342]" />
+                 <div className="absolute bottom-0 right-0 h-[80%] w-[120%] translate-x-10 rounded-tl-[100%] bg-[#558B2F]" />
+               </div>
+             </div>
           </div>
-          <div className="flex flex-col gap-6">
-            <h1 className="max-w-2xl text-4xl font-semibold leading-tight text-foreground md:text-5xl">
-              Modern photobooth experiences for guests and admins in one flow.
-            </h1>
-            <p className="max-w-2xl text-lg text-muted-foreground">
-              Launch immersive booth sessions, apply overlays, and track usage in
-              a beautiful dashboard powered by Supabase.
-            </p>
-            <div className="flex flex-wrap gap-4">
-              <Button asChild size="lg">
-                <Link href="/booth">
-                  <Camera className="h-4 w-4" />
-                  Open Booth
-                </Link>
-              </Button>
-              <Button asChild variant="secondary" size="lg">
-                <Link href="/admin">
-                  <LayoutDashboard className="h-4 w-4" />
-                  Admin Dashboard
-                </Link>
-              </Button>
-            </div>
-          </div>
-        </header>
-        <section className="grid gap-6 md:grid-cols-3">
-          {[
-            {
-              title: "Live Capture",
-              body: "Capture sessions with guided prompts and animated transitions.",
-            },
-            {
-              title: "Smart Overlays",
-              body: "Stack branded frames and effects using canvas templates.",
-            },
-            {
-              title: "Realtime Insights",
-              body: "Measure engagement with charts and Supabase analytics.",
-            },
-          ].map((item) => (
-            <Card key={item.title}>
-              <CardContent className="flex flex-col gap-3 px-5 py-6">
-                <h3 className="text-lg font-semibold text-foreground">
-                  {item.title}
-                </h3>
-                <p className="text-sm text-muted-foreground">{item.body}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </section>
+
+          {/* Retro Logo */}
+          <h1 className="mb-8 text-6xl font-black tracking-tighter text-white sm:text-7xl"
+              style={{
+                textShadow: `
+                  4px 4px 0px #00AEEF,
+                  8px 8px 0px #FFF200,
+                  12px 12px 0px #F7941D,
+                  16px 16px 0px #EC008C
+                `,
+                WebkitTextStroke: "2px black"
+              }}>
+            BOOTHLAB
+          </h1>
+
+          {/* Start Button */}
+          <Button 
+            asChild 
+            className="h-14 w-48 rounded-2xl bg-black text-xl font-bold text-white shadow-xl transition-transform hover:scale-105 hover:bg-gray-900"
+          >
+            <Link href="/booth?autoStart=true">
+              Start
+            </Link>
+          </Button>
+
+        </div>
       </main>
+
+      {/* Footer */}
+      <footer className="flex w-full flex-col items-center pb-4">
+        <p className="mb-2 text-sm font-semibold text-gray-800 drop-shadow-sm">
+          powered by <span className="font-bold">Boothlab.id</span>
+        </p>
+        
+        {/* Bottom Color Strip */}
+        <div className="flex h-4 w-full">
+          <div className="h-full w-1/4 bg-[#00AEEF]" />
+          <div className="h-full w-1/4 bg-[#FFF200]" />
+          <div className="h-full w-1/4 bg-[#F7941D]" />
+          <div className="h-full w-1/4 bg-[#EC008C]" />
+        </div>
+      </footer>
     </div>
   );
 }

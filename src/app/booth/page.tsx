@@ -7,8 +7,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Cloud } from "lucide-react";
 
 import {
   PaymentMethod,
@@ -28,7 +29,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-import { IdleStep } from "../../components/features/booth/idle-step";
 import { PaymentStep } from "../../components/features/booth/payment-step";
 import { NonCashStep } from "../../components/features/booth/non-cash-step";
 import { TemplateStep } from "../../components/features/booth/template-step";
@@ -46,6 +46,9 @@ import { useImageProcessing } from "../../components/features/booth/hooks/useIma
 import { loadImage } from "../../components/features/booth/utils";
 
 export default function BoothPage() {
+  const searchParams = useSearchParams();
+  const autoStart = searchParams.get("autoStart");
+  
   // --- Hooks ---
   const { state, dispatch } = useBoothState();
   const {
@@ -90,6 +93,8 @@ export default function BoothPage() {
   const [isVoucherDialogOpen, setIsVoucherDialogOpen] = useState(false);
   const [voucherCode, setVoucherCode] = useState("");
   const [verifyingVoucher, setVerifyingVoucher] = useState(false);
+
+  const [isAutoStarting, setIsAutoStarting] = useState(false);
 
   // --- Refs ---
   const finishTimerRef = useRef<number | null>(null);
@@ -205,16 +210,41 @@ export default function BoothPage() {
 
   // --- Handlers ---
 
-  const handleStart = async () => {
-    await loadPricing();
-    const methods = await loadPaymentMethods();
+  const handleStart = useCallback(async () => {
+    console.log("[handleStart] Triggered");
     
-    // Check if "Event" is the ONLY active payment method
-    // Note: methods can be undefined if something fails, so we check for array existence
-    if (methods && methods.length === 1 && methods[0].name === "Event") {
-      dispatch({ type: "SET_PAYMENT_METHOD", method: methods[0].name });
+    // If triggered by autoStart, set loading state
+    if (autoStart === "true") {
+        setIsAutoStarting(true);
+    }
+    
+    try {
+      await loadPricing();
+      const methods = await loadPaymentMethods();
+      console.log("[handleStart] Payment methods loaded:", methods?.length);
       
+      // Check if "Event" is the ONLY active payment method
+      // Note: methods can be undefined if something fails, so we check for array existence
+      if (methods && methods.length === 1 && methods[0].name === "Event") {
+        console.log("[handleStart] Auto-selecting 'Event' payment method");
+        dispatch({ type: "SET_PAYMENT_METHOD", method: methods[0].name });
+        
+        const templates = await loadTemplates();
+        console.log("[handleStart] Templates loaded:", templates?.length);
+        if (templates.length > 0) {
+          const first = templates[0];
+          setSelectedTemplate(first);
+          dispatch({ type: "SET_TEMPLATE", templateId: first.id });
+          const image = await loadImage(first.url);
+          setTemplateImage(image);
+        }
+        console.log("[handleStart] Going to step: template");
+        await goToStep("template");
+        return;
+      }
+
       const templates = await loadTemplates();
+      console.log("[handleStart] Templates loaded (default flow):", templates?.length);
       if (templates.length > 0) {
         const first = templates[0];
         setSelectedTemplate(first);
@@ -222,20 +252,73 @@ export default function BoothPage() {
         const image = await loadImage(first.url);
         setTemplateImage(image);
       }
+      console.log("[handleStart] Going to step: template (default flow)");
       await goToStep("template");
-      return;
+    } catch (error) {
+        console.error("[handleStart] Error starting session:", error);
+    } finally {
+        setIsAutoStarting(false);
     }
+  }, [dispatch, loadPricing, loadPaymentMethods, loadTemplates, goToStep, setSelectedTemplate, setTemplateImage, autoStart]);
 
-    const templates = await loadTemplates();
-    if (templates.length > 0) {
-      const first = templates[0];
-      setSelectedTemplate(first);
-      dispatch({ type: "SET_TEMPLATE", templateId: first.id });
-      const image = await loadImage(first.url);
-      setTemplateImage(image);
+  const hasAutoStarted = useRef(false);
+
+  useEffect(() => {
+    if (autoStart === "true" && state.step === "idle" && !hasAutoStarted.current) {
+      console.log("[useEffect] Auto-start triggered");
+      hasAutoStarted.current = true;
+      handleStart();
     }
-    await goToStep("template");
-  };
+  }, [autoStart, state.step, handleStart]);
+
+  // If auto-starting, show a fake loading screen that mimics the Home page
+  if (isAutoStarting) {
+    return (
+      <div className="relative flex w-full max-w-2xl flex-col items-center overflow-hidden rounded-xl bg-white p-8 shadow-2xl">
+        
+        {/* Checkered Frame */}
+        <div className="relative mb-8 flex aspect-[4/3] w-full max-w-md items-center justify-center overflow-hidden border-[12px] border-[#333] bg-sky-200 p-1 shadow-inner">
+           {/* Decorative Dots Pattern on Border */}
+           <div className="absolute inset-0 border-[4px] border-dashed border-white/30 pointer-events-none"></div>
+           
+           {/* Illustration */}
+           <div className="relative h-full w-full overflow-hidden bg-[#87CEEB]">
+             {/* Clouds */}
+             <Cloud className="absolute left-10 top-10 h-16 w-16 text-white opacity-90" fill="white" />
+             <Cloud className="absolute right-20 top-16 h-12 w-12 text-white opacity-80" fill="white" />
+             <Cloud className="absolute left-1/2 top-8 h-20 w-20 -translate-x-1/2 text-white" fill="white" />
+             
+             {/* Hills */}
+             <div className="absolute bottom-0 h-1/2 w-full">
+               <div className="absolute bottom-0 left-0 h-full w-[120%] -translate-x-10 rounded-tr-[100%] bg-[#7CB342]" />
+               <div className="absolute bottom-0 right-0 h-[80%] w-[120%] translate-x-10 rounded-tl-[100%] bg-[#558B2F]" />
+             </div>
+           </div>
+        </div>
+
+        {/* Retro Logo */}
+        <h1 className="mb-8 text-6xl font-black tracking-tighter text-white sm:text-7xl"
+            style={{
+              textShadow: `
+                4px 4px 0px #00AEEF,
+                8px 8px 0px #FFF200,
+                12px 12px 0px #F7941D,
+                16px 16px 0px #EC008C
+              `,
+              WebkitTextStroke: "2px black"
+            }}>
+          BOOTHLAB
+        </h1>
+
+        {/* Loading Indicator */}
+        <div className="flex flex-col items-center gap-4 h-14 justify-center">
+           <div className="h-8 w-8 animate-spin rounded-full border-4 border-black border-t-transparent" />
+           <p className="text-sm font-semibold text-muted-foreground">Memulai sesi...</p>
+        </div>
+
+      </div>
+    );
+  }
 
   const handleSelectPayment = async (method: PaymentMethod) => {
     if (method.type === 'cash') {
@@ -439,9 +522,9 @@ export default function BoothPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground overflow-hidden">
+    <div className="relative flex w-full max-w-6xl h-[90vh] flex-col overflow-hidden rounded-xl bg-white shadow-2xl">
       {/* Header */}
-      <header className="flex h-20 items-center justify-between border-b px-8">
+      <header className="flex h-20 items-center justify-between border-b px-8 shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/25">
             <Sparkles className="h-6 w-6" />
@@ -473,137 +556,136 @@ export default function BoothPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-hidden p-6 relative">
-        <AnimatePresence mode="wait">
-          {state.step === "idle" && (
-            <IdleStep key="idle" onStart={handleStart} />
-          )}
-
+      <div className="flex-1 overflow-hidden p-6 relative">
+        <>
+          <AnimatePresence mode="wait">
           {state.step === "payment" && (
-            <PaymentStep
-              key="payment"
-              paymentOptions={paymentMethods}
-              nonCashAvailable={nonCashMethods.length > 0}
-              onSelectPayment={handleSelectPayment}
-              onGoToStep={goToStep}
-            />
-          )}
+                <PaymentStep
+                  key="payment"
+                  paymentOptions={paymentMethods}
+                  nonCashAvailable={nonCashMethods.length > 0}
+                  onSelectPayment={handleSelectPayment}
+                  onGoToStep={goToStep}
+                />
+              )}
 
-          {state.step === "noncash" && (
-            <NonCashStep
-              key="noncash"
-              nonCashMethods={nonCashMethods}
-              onSelectNonCash={handleSelectNonCash}
-              onGoToStep={goToStep}
-            />
-          )}
+              {state.step === "noncash" && (
+                <NonCashStep
+                  key="noncash"
+                  nonCashMethods={nonCashMethods}
+                  onSelectNonCash={handleSelectNonCash}
+                  onGoToStep={goToStep}
+                />
+              )}
 
-          {state.step === "template" && (
-            <TemplateStep
-              key="template"
-              templates={templates}
-              selectedTemplate={selectedTemplate}
-              onSelectTemplate={handleTemplateSelect}
-              onGoToStep={goToStep}
-              onGoToQuantity={handleGoToQuantity}
-            />
-          )}
+              {state.step === "template" && (
+                <TemplateStep
+                  key="template"
+                  templates={templates}
+                  pricing={pricing}
+                  selectedTemplate={selectedTemplate}
+                  onSelectTemplate={handleTemplateSelect}
+                  onGoToStep={goToStep}
+                  onGoToQuantity={handleGoToQuantity}
+                />
+              )}
 
-          {state.step === "quantity" && (
-            <QuantityStep
-              key="quantity"
-              quantity={state.transaction.quantity}
-              pricing={pricing}
-              onSelectQuantity={handleQuantitySelect}
-              onGoToStep={goToStep}
-            />
-          )}
+              {state.step === "quantity" && (
+                <QuantityStep
+                  key="quantity"
+                  quantity={state.transaction.quantity}
+                  pricing={pricing}
+                  onSelectQuantity={handleQuantitySelect}
+                  onGoToStep={goToStep}
+                />
+              )}
 
-          {state.step === "qris" && (
-            <QrisStep
-              key="qris"
-              transaction={state.transaction}
-              onSimulatePaid={handleSimulatePaid}
-              onGoToStep={goToStep}
-            />
-          )}
+              {state.step === "qris" && (
+                <QrisStep
+                  key="qris"
+                  transaction={state.transaction}
+                  onSimulatePaid={handleSimulatePaid}
+                  onGoToStep={goToStep}
+                />
+              )}
 
-          {state.step === "session" && (
-            <SessionStep
-              key="session"
-              capturedPhotos={capturedPhotos}
-              selectedTemplate={selectedTemplate}
-              onPreviewVideoMount={onPreviewVideoMount}
-              countdown={countdown}
-              startPhotoSession={handleStartPhotoSession}
-              isCapturing={isCapturing}
-              onGoToStep={goToStep}
-              retakeIndex={retakeIndex}
-              onCancelRetake={handleCancelRetake}
-            />
-          )}
+              {state.step === "session" && (
+                <SessionStep
+                  key="session"
+                  capturedPhotos={capturedPhotos}
+                  selectedTemplate={selectedTemplate}
+                  onPreviewVideoMount={onPreviewVideoMount}
+                  countdown={countdown}
+                  startPhotoSession={handleStartPhotoSession}
+                  isCapturing={isCapturing}
+                  onGoToStep={goToStep}
+                  retakeIndex={retakeIndex}
+                  onCancelRetake={handleCancelRetake}
+                />
+              )}
 
-          {state.step === "filter" && (
-            <FilterStep
-              key="filter"
-              capturedPhotos={capturedPhotos}
-              selectedTemplate={selectedTemplate}
-              templateImage={templateImage}
-              selectedFilter={selectedFilter}
-              onSelectFilter={setSelectedFilter}
-              onGoToStep={goToStep}
-              onGenerateFinalImage={handleGenerateFinalImage}
-              onRetakePhoto={handleRetakePhotoRequest}
-            />
-          )}
+              {state.step === "filter" && (
+                <FilterStep
+                  key="filter"
+                  capturedPhotos={capturedPhotos}
+                  selectedTemplate={selectedTemplate}
+                  templateImage={templateImage}
+                  selectedFilter={selectedFilter}
+                  onSelectFilter={setSelectedFilter}
+                  onGoToStep={goToStep}
+                  onGenerateFinalImage={handleGenerateFinalImage}
+                  onRetakePhoto={handleRetakePhotoRequest}
+                />
+              )}
 
-          {state.step === "delivery" && (
-            <DeliveryStep
-              key="delivery"
-              finalPreviewUrl={finalPreviewUrl}
-              storageUrl={storageUrl}
-              isUploading={isUploading}
-              transaction={state.transaction}
-              onSetEmail={handleSetEmail}
-              onGoToStep={goToStep}
-              capturedPhotos={capturedPhotos}
-              capturedVideos={capturedVideos}
-              supabase={supabase}
-            />
-          )}
+              {state.step === "delivery" && (
+                <DeliveryStep
+                  key="delivery"
+                  finalPreviewUrl={finalPreviewUrl}
+                  storageUrl={storageUrl}
+                  isUploading={isUploading}
+                  transaction={state.transaction}
+                  onSetEmail={handleSetEmail}
+                  onGoToStep={goToStep}
+                  capturedPhotos={capturedPhotos}
+                  capturedVideos={capturedVideos}
+                  supabase={supabase}
+                />
+              )}
 
-          {state.step === "finish" && (
-            <FinishStep key="finish" onReset={resetFlow} />
-          )}
-        </AnimatePresence>
+              {state.step === "finish" && (
+                <FinishStep key="finish" onReset={resetFlow} />
+              )}
+            </AnimatePresence>
 
-        <Dialog open={isVoucherDialogOpen} onOpenChange={setIsVoucherDialogOpen}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Enter Voucher Code</DialogTitle>
-              <DialogDescription>
-                Please enter the voucher code provided by the operator.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleVoucherSubmit} className="space-y-4">
-              <Input
-                placeholder="PH-XXXX"
-                value={voucherCode}
-                onChange={(e) => setVoucherCode(e.target.value.toUpperCase())}
-                autoFocus
-              />
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setIsVoucherDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={verifyingVoucher || !voucherCode}>
-                  {verifyingVoucher ? "Verifying..." : "Validate"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </main>
-    </div>
+            <Dialog open={isVoucherDialogOpen} onOpenChange={setIsVoucherDialogOpen}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Enter Voucher Code</DialogTitle>
+                  <DialogDescription>
+                    Please enter the voucher code provided by the operator.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleVoucherSubmit} className="space-y-4">
+                  <Input
+                    placeholder="PH-XXXX"
+                    value={voucherCode}
+                    onChange={(e) => setVoucherCode(e.target.value.toUpperCase())}
+                    autoFocus
+                  />
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setIsVoucherDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={verifyingVoucher || !voucherCode}>
+                      {verifyingVoucher ? "Verifying..." : "Validate"}
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </>
+        </div>
+      </div>
   );
 }

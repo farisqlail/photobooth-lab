@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { createSupabaseBrowserClient } from "../../../../lib/supabase/client";
 import { PaymentMethod, TemplateOption } from "../types";
 import { loadImage } from "../utils";
@@ -22,7 +22,7 @@ export function useBoothData() {
   const [templates, setTemplates] = useState<TemplateOption[]>([]);
   const [pricing, setPricing] = useState({ basePrice: 20000, perPrintPrice: 5000, sessionCountdown: 300 });
 
-  const loadPaymentMethods = async () => {
+  const loadPaymentMethods = useCallback(async () => {
     if (!supabase) {
       setPaymentMethods([
         { id: "cash", name: "Tunai", type: "cash", is_active: true },
@@ -52,9 +52,9 @@ export function useBoothData() {
     setPaymentMethods(methods);
     setNonCashMethods(nonCash);
     return methods;
-  };
+  }, [supabase]);
 
-  const loadPricing = async () => {
+  const loadPricing = useCallback(async () => {
     if (!supabase) {
       return;
     }
@@ -94,9 +94,9 @@ export function useBoothData() {
         sessionCountdown: data.session_countdown ? Number(data.session_countdown) : 300,
       });
     }
-  };
+  }, [supabase]);
 
-  const loadTemplates = async () => {
+  const loadTemplates = useCallback(async () => {
     if (!supabase) {
       setTemplates([]);
       return [];
@@ -150,9 +150,9 @@ export function useBoothData() {
     const available = mapped.filter((item) => item.url);
     setTemplates(available);
     return available;
-  };
+  }, [supabase]);
 
-  const createTransaction = async (total: number, paymentMethod?: string, templateId?: string) => {
+  const createTransaction = useCallback(async (total: number, paymentMethod?: string, templateId?: string) => {
     if (!supabase) {
       return null;
     }
@@ -167,15 +167,15 @@ export function useBoothData() {
       .select("id")
       .single();
     return data?.id ?? null;
-  };
+  }, [supabase]);
 
-  const updateTransactionStatus = async (id: string, status: "paid" | "pending" | "canceled") => {
+  const updateTransactionStatus = useCallback(async (id: string, status: "paid" | "pending" | "canceled") => {
     if (!supabase) return;
     await supabase
       .from("transactions")
       .update({ payment_status: status })
       .eq("id", id);
-  };
+  }, [supabase]);
 
   return {
     supabase,
